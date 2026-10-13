@@ -146,32 +146,65 @@ def extract_hashtags_from_text(text: str) -> tuple[str, List[str]]:
     return clean_text, [tag[1:] for tag in hashtags]
 
 
+def message_to_text(content) -> str:
+    """LangChain messages may be a string or a list of text blocks."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(block.get("text") or block.get("content") or "")
+            else:
+                parts.append(getattr(block, "text", "") or str(block))
+        return "\n".join(part for part in parts if part)
+    return str(content)
+
+
+_SAFETY_LINE = re.compile(
+    r'^\s*(user\s+safety|safety\s+rating|safety)\s*:\s*.+$',
+    re.IGNORECASE,
+)
+
+
 def clean_post_content(raw_content: str) -> str:
     """Strip the commentary and markdown models tend to add around the post itself."""
-    content = raw_content.strip()
+    content = message_to_text(raw_content).strip()
+    if not content:
+        return ""
 
+    # Gemma / some Gemini replies wrap the tweet in a fence or a safety header.
+    content = re.sub(r'^```(?:\w+)?\s*', '', content)
+    content = re.sub(r'\s*```$', '', content)
+    content = re.sub(r'^---+\s*', '', content)
+    content = re.sub(r'\s*---+$', '', content)
+    content = "\n".join(
+        line for line in content.splitlines() if not _SAFETY_LINE.match(line)
+    ).strip()
+
+    # Only keep the left side of a commentary marker when it still looks like a post.
     separators = [
-        '---',
         '**Key features:**',
         '**Features:**',
         'Key features:',
         'Features:',
-        '\n\n**',
-        '\n---',
-        "Here's the",
         '(Analysis:',
         '[Analysis:',
         'Character count:',
         'Word count:',
     ]
-
     for separator in separators:
         if separator in content:
-            content = content.split(separator)[0].strip()
+            left = content.split(separator, 1)[0].strip()
+            if len(left) >= 20:
+                content = left
 
     content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)
     content = re.sub(r'\*(.*?)\*', r'\1', content)
-
     content = re.sub(r'\n{3,}', '\n\n', content)
 
     return content.strip()
@@ -202,6 +235,7 @@ class SocialMediaGenState(BaseModel):
     generated_posts: Optional[List[Dict]] = None
     error: Optional[str] = None
     is_research_needed: bool = True
+    is_image_needed: bool = False
 
 
 def get_field(state: Union[SocialMediaGenState, dict], field: str):
@@ -393,12 +427,14 @@ async def content_generation_node(
 
     platform_config = PLATFORM_CONFIGS.get(platform, PLATFORM_CONFIGS['facebook'])
     llm = get_llm()
+    is_image_needed = bool(get_field(state, "is_image_needed"))
 
-    try:
-        image_gen = AiImageGen()
-    except Exception as exc:  # noqa: BLE001 - posts are still useful without images
-        logger.warning("Image generation unavailable: %s", exc)
-        image_gen = None
+    image_gen = None
+    if is_image_needed:
+        try:
+            image_gen = AiImageGen()
+        except Exception as exc:  # noqa: BLE001 - posts are still useful without images
+            logger.warning("Image generation unavailable: %s", exc)
 
     generated_posts = []
 
@@ -431,12 +467,23 @@ IMPORTANT: Return ONLY the post text, ready to publish. No analysis, notes or ex
 """
 
             content_response = await llm.ainvoke(content_prompt)
-            cleaned_content = clean_post_content(content_response.content.strip())
+            cleaned_content = clean_post_content(content_response.content)
             post_text, hashtags = extract_hashtags_from_text(cleaned_content)
             post_text = truncate_for_platform(post_text, platform)
             hashtags = hashtags[: platform_config['hashtag_limit']]
 
-            image_prompt = f"""
+            if not post_text.strip():
+                logger.warning(
+                    "Empty copy for idea %s; raw response was: %s",
+                    idea.get('idea_number'),
+                    message_to_text(content_response.content)[:300],
+                )
+                continue
+
+            image_prompt = ""
+            image_url = None
+            if is_image_needed:
+                image_prompt = f"""
 Create a high-quality, professional social media image for {platform} about: {topic}
 
 Visual style: {idea.get('visual_style', f'Professional image related to {topic}')}
@@ -451,9 +498,7 @@ Requirements:
 - Brand-safe and commercially appropriate
 - No garbled or misspelled text
 """
-
-            image_url = None
-            if image_gen:
+            if is_image_needed and image_gen:
                 try:
                     image_url = image_gen.generate_image(image_prompt)
                 except Exception as img_error:  # noqa: BLE001
@@ -501,6 +546,7 @@ async def generate_social_media_posts(
     num_posts: int = 1,
     business_context: str = None,
     is_research_needed: bool = True,
+    is_image_needed: bool = False,
 ) -> tuple[List[Dict], list]:
     """Run the generation pipeline and return ``(posts, sources)``."""
     if platform.lower() not in PLATFORM_CONFIGS:
@@ -525,16 +571,18 @@ async def generate_social_media_posts(
         business_context=business_context,
         num_posts=num_posts,
         is_research_needed=is_research_needed,
+        is_image_needed=is_image_needed,
     )
 
     app = workflow.compile()
 
     logger.info(
-        "Generating %s %s post(s) for '%s' (research=%s)",
+        "Generating %s %s post(s) for '%s' (research=%s, images=%s)",
         num_posts,
         platform,
         topic,
         is_research_needed,
+        is_image_needed,
     )
     final_state = await app.ainvoke(initial_state)
 
@@ -609,7 +657,9 @@ class SocialMediaPostCreator:
 
         return "\n\n".join(parts)
 
-    def create_posts(self, topic, num_posts, platform, is_research_needed=True):
+    def create_posts(
+        self, topic, num_posts, platform, is_research_needed=True, is_image_needed=False
+    ):
         """Generate posts and persist them as drafts. Runs on a background thread."""
         try:
             # A dedicated loop is needed because this runs outside the request loop.
@@ -623,6 +673,7 @@ class SocialMediaPostCreator:
                         num_posts=num_posts,
                         business_context=self.build_business_context(),
                         is_research_needed=is_research_needed,
+                        is_image_needed=is_image_needed,
                     )
                 )
             finally:

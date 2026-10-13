@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 SUPPORTED_PLATFORMS = ('facebook', 'instagram', 'twitter', 'linkedin')
 
 
+def _as_bool(value, default=False):
+    """JSON and form payloads both land in request.data."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(value)
+
+
 def combine_post_text_with_hashtags(post_text: str, hashtags: list) -> str:
     """Hashtags are stored separately so they can be edited; publishing needs them inline."""
     if not hashtags:
@@ -57,7 +68,8 @@ def create_social_media_post(request):
     topic = request.data.get('topic')
     platform = request.data.get('platform')
     num_posts = request.data.get('num_posts', 1)
-    is_research_needed = request.data.get('is_research_needed', True)
+    is_research_needed = _as_bool(request.data.get('is_research_needed'), default=True)
+    is_image_needed = _as_bool(request.data.get('is_image_needed'), default=False)
 
     if not topic or not platform:
         return Response(
@@ -86,7 +98,7 @@ def create_social_media_post(request):
     # finish inside the request. The client polls post-creation-status instead.
     thread = threading.Thread(
         target=post_creator.create_posts,
-        args=(topic, num_posts, platform, is_research_needed),
+        args=(topic, num_posts, platform, is_research_needed, is_image_needed),
     )
     thread.daemon = True
     thread.start()

@@ -112,7 +112,7 @@ export default function PostCard({
   };
 
   return (
-    <div className="card-hover flex h-[520px] flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-800/50 shadow-xl backdrop-blur-sm">
+    <div className="card-hover flex min-h-[280px] flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-800/50 shadow-xl backdrop-blur-sm">
       {hasImages && (
         <div className="relative h-48 w-full shrink-0 overflow-hidden">
           <Image
@@ -240,10 +240,12 @@ export default function PostCard({
         <div className="mb-3 flex-1 overflow-hidden text-sm text-gray-300">
           <p
             className={`whitespace-pre-wrap ${
-              isExpanded ? "max-h-56 overflow-y-auto pr-2" : "line-clamp-5"
-            }`}
+              isExpanded ? "max-h-56 overflow-y-auto pr-2" : "line-clamp-8"
+            } ${fullText.trim() ? "" : "italic text-gray-500"}`}
           >
-            {fullText}
+            {fullText.trim()
+              ? fullText
+              : "No copy was generated for this draft. Edit it to add text."}
           </p>
           {fullText.length > 180 && (
             <button

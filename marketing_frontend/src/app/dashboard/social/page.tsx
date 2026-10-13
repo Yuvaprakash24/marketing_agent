@@ -35,6 +35,7 @@ export default function SocialMediaPage() {
   const [platform, setPlatform] = useState("twitter");
   const [numPosts, setNumPosts] = useState(1);
   const [isResearchNeeded, setIsResearchNeeded] = useState(true);
+  const [isImageNeeded, setIsImageNeeded] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
 
@@ -129,7 +130,8 @@ export default function SocialMediaPage() {
         topic.trim(),
         platform,
         numPosts,
-        isResearchNeeded
+        isResearchNeeded,
+        isImageNeeded
       );
       setTopic("");
     } catch (err) {
@@ -234,8 +236,10 @@ export default function SocialMediaPage() {
             <div>
               <p className="font-medium text-white">Writing your posts…</p>
               <p className="text-sm text-gray-400">
-                Researching the topic, drafting copy and generating images. This usually
-                takes a minute or two.
+                Drafting copy
+                {isResearchNeeded ? ", researching the topic" : ""}
+                {isImageNeeded ? ", and generating images" : ""}. This usually takes a
+                minute or two.
               </p>
             </div>
           </div>
@@ -412,6 +416,22 @@ export default function SocialMediaPage() {
                   <span className="block text-xs text-gray-500">
                     Pulls current context from the web before writing. Slower, but more
                     specific.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={isImageNeeded}
+                  onChange={(e) => setIsImageNeeded(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-blue-500"
+                />
+                <span className="text-sm text-gray-300">
+                  Generate an AI image
+                  <span className="block text-xs text-gray-500">
+                    Creates a matching image for each post. Leave off for text-only
+                    drafts. Instagram still needs an image before you can publish.
                   </span>
                 </span>
               </label>

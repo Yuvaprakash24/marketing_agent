@@ -67,7 +67,8 @@ export async function createSocialMediaPosts(
   topic: string,
   platform: string,
   numPosts: number = 1,
-  isResearchNeeded: boolean = true
+  isResearchNeeded: boolean = true,
+  isImageNeeded: boolean = false
 ) {
   if (!topic || !platform) {
     throw new Error('Topic and platform are required')
@@ -86,6 +87,7 @@ export async function createSocialMediaPosts(
         platform,
         num_posts: numPosts,
         is_research_needed: isResearchNeeded,
+        is_image_needed: isImageNeeded,
       }),
     }
   )
